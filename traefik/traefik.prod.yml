@@ -1,0 +1,160 @@
+traefik/traefik.prod.yml
+# ═════════════════════════════════════════════════════════════
+# IMPERIUM 7™ — TRAEFIK PRO CONFIGURATION
+# Production-grade reverse proxy with full routing
+# ═════════════════════════════════════════════════════════════
+
+global:
+  checkNewVersion: true
+  sendAnonymousUsage: false
+
+entryPoints:
+  web:
+    address: ':80'
+    http:
+      redirections:
+        entrypoint:
+          scheme: https
+          port: 443
+  websecure:
+    address: ':443'
+    http:
+      tls:
+        certResolver: letsencrypt
+        options: default
+        domains:
+          - main: deputatai.com
+            sans:
+              - '*.deputatai.com'
+              - api.deputatai.com
+              - workspace.deputatai.com
+              - ml.deputatai.com
+              - dashboard.deputatai.com
+    http2:
+      maxConcurrentStreams: 250
+    http3: {}
+    forwardedHeaders:
+      insecure: false
+      trustedIPs:
+        - 127.0.0.1/32
+        - 10.0.0.0/8
+        - 172.16.0.0/12
+        - 192.168.0.0/16
+
+api:
+  debug: false
+  dashboard: true
+  disableDashboardSslRedirect: false
+  entryPoint: websecure
+
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+    entryPoint: metrics
+    buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
+
+log:
+  level: INFO
+  format: json
+  filePath: /var/log/traefik/traefik.log
+
+accessLog:
+  filePath: /var/log/traefik/access.log
+  format: json
+  bufferingSize: 100
+  filters:
+    statusCodes:
+      - '200'
+      - '400-599'
+    retryAttempts: true
+    minDuration: 0
+
+tracing:
+  jaeger:
+    samplingServerURL: http://jaeger:14250
+    samplingType: const
+    samplingParam: 1.0
+    traceContextHeaderName: X-Trace-ID
+
+certificates:
+  - certFile: /etc/certs/server.crt
+    keyFile: /etc/certs/server.key
+
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      email: admin@deputatai.com
+      storage: /etc/traefik/acme/acme.json
+      caServer: https://acme-v02.api.letsencrypt.org/directory
+      keyType: EC256
+      httpChallenge:
+        entryPoint: web
+      tlsChallenge: {}
+      dnsChallenges:
+        - provider: cloudflare
+          disablePropagationCheck: false
+          delayBeforeCheck: 0s
+          resolvers:
+            - 1.1.1.1
+            - 8.8.8.8
+
+servers:
+  transport:
+    insecureSkipVerify: false
+    maxIdleConnsPerHost: 200
+    responseHeaderTimeout: 0s
+    dialTimeout: 30s
+    dialKeepAlive: 15s
+
+providers:
+  docker:
+    endpoint: unix:///var/run/docker.sock
+    exposedByDefault: false
+    useBindPortIP: false
+    network: traefik-net
+    watch: true
+    swarmMode: false
+    defaultRule: Host(`{{ index .Labels "com.docker.compose.service" }}.deputatai.com`)
+  file:
+    filename: /dynamic-config.yml
+    watch: true
+
+middleware:
+  redirectRegex:
+    redirections:
+      - regex: ^https://www\.(.*)$
+        replacement: https://$1
+        permanent: true
+  compress:
+    minResponseBodyBytes: 1024
+  rateLimit:
+    average: 100
+    period: 60s
+    burst: 200
+  basicAuth:
+    users:
+      - admin:$2y$05$7aXe.FXQvKYNyA7WL5xoXOCMYKQqmS9aTfR2pJ8t9QQxGV2pN1cTe
+  cors:
+    allowedOrigins:
+      - https://deputatai.com
+      - https://*.deputatai.com
+    allowedMethods:
+      - GET
+      - POST
+      - PUT
+      - DELETE
+      - OPTIONS
+    allowedHeaders:
+      - Content-Type
+      - Authorization
+    maxAge: 3600
+    allowCredentials: true
+  securityHeaders:
+    customResponseHeaders:
+      X-Frame-Options: SAMEORIGIN
+      X-Content-Type-Options: nosniff
+      X-XSS-Protection: '1; mode=block'
+      Referrer-Policy: strict-origin-when-cross-origin
+      Permissions-Policy: 'geolocation=(), microphone=(), camera=()'
+      Strict-Transport-Security: 'max-age=31536000; includeSubDomains; preload'
