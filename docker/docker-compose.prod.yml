@@ -103,9 +103,9 @@ services:
       - traefik-net
 
   hermes-agent:
-    build:
-      context: ../ml-tools
-      dockerfile: Dockerfile
+  build:
+    context: ./ml-tools
+    dockerfile: Dockerfile
     container_name: hermes-agent
     restart: unless-stopped
     networks:
