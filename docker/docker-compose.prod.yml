@@ -1,38 +1,77 @@
-version: '3.9'
+version: "3.9"
 
 services:
-  imperium-backend:
-    build:
-      context: ../imperium-backend
-      dockerfile: Dockerfile
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    restart: always
+    command:
+      - "--providers.file.filename=/etc/traefik/dynamic-config.yml"
+      - "--providers.file.watch=true"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.email=admin@deputatai.com"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/etc/traefik/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--api.dashboard=true"
     ports:
-      - "4000:4000"
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/traefik.prod.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic-config.yml:/etc/traefik/dynamic-config.yml:ro
+      - traefik-acme:/etc/traefik
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - traefik-net
 
   imperium-hub-app:
     build:
       context: ../imperium-hub-app
-      dockerfile: Dockerfile
-    ports:
-      - "3000:3000"
+    container_name: imperium-hub-app
+    restart: always
+    networks:
+      - traefik-net
+
+  imperium-backend:
+    build:
+      context: ../imperium-backend
+    container_name: imperium-backend
+    restart: always
+    environment:
+      - NODE_ENV=production
+    networks:
+      - traefik-net
 
   hermes-workspace:
     build:
       context: ../hermes-workspace
-      dockerfile: Dockerfile
-    ports:
-      - "3001:3000"
+    container_name: hermes-workspace
+    restart: always
+    networks:
+      - traefik-net
 
   react-playground:
     build:
       context: ../react-playground
-      dockerfile: Dockerfile
-    ports:
-      - "3002:3000"
+    container_name: react-playground
+    restart: always
+    networks:
+      - traefik-net
 
   hermes-agent:
-    build:
-      context: ./ml-tools
-      dockerfile: Dockerfile
-   ports:
-      - "8001:8001"
+    image: hermes-agent:latest
+    container_name: hermes-agent
+    restart: always
+    networks:
+      - traefik-net
+    expose:
+      - "8001"
+
+networks:
+  traefik-net:
+    external: false
+
+volumes:
+  traefik-acme:
 
