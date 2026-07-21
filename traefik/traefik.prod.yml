@@ -1,39 +1,25 @@
-log:
-  level: INFO
+version: '3.9'
 
-api:
-  dashboard: true
+services:
+  traefik:
+    image: traefik:v3.0
+    container_name: imperium-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    networks:
+      - traefik-net
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.prod.yml:/traefik.yml:ro
+      - ./traefik/dynamic-config.yml:/dynamic-config.yml:ro
+      - traefik-certs:/etc/traefik/acme
 
-entryPoints:
-  web:
-    address: ":80"
-    http:
-      redirections:
-        entrypoint:
-          to: websecure
-          scheme: https
-  websecure:
-    address: ":443"
-    http:
-      tls:
-        certResolver: letsencrypt
-        options: default
+networks:
+  traefik-net:
+    external: true
 
-providers:
-  file:
-    filename: "/etc/traefik/dynamic-config.yml"
-    watch: true
-
-certificatesResolvers:
-  letsencrypt:
-    acme:
-      email: "admin@deputatai.com"
-      storage: "/etc/traefik/acme.json"
-      httpChallenge:
-        entryPoint: web
-
-tls:
-  options:
-    default:
-      minVersion: VersionTLS12
-      sniStrict: true
+volumes:
+  traefik-certs:
