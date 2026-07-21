@@ -1,0 +1,96 @@
+http:
+  routers:
+    hub:
+      rule: Host(`deputatai.com`) || Host(`dashboard.deputatai.com`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - securityHeaders
+        - compress
+      service: hub
+      tls:
+        certResolver: letsencrypt
+
+    api:
+      rule: Host(`api.deputatai.com`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - securityHeaders
+        - compress
+      service: imperium-backend
+      tls:
+        certResolver: letsencrypt
+
+    ml:
+      rule: Host(`ml.deputatai.com`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - securityHeaders
+        - compress
+      service: hermes-agent
+      tls:
+        certResolver: letsencrypt
+
+    workspace:
+      rule: Host(`workspace.deputatai.com`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - securityHeaders
+        - compress
+      service: hermes-workspace
+      tls:
+        certResolver: letsencrypt
+
+    playground:
+      rule: Host(`playground.deputatai.com`)
+      entryPoints:
+        - websecure
+      middlewares:
+        - securityHeaders
+        - compress
+      service: react-playground
+      tls:
+        certResolver: letsencrypt
+
+  services:
+    hub:
+      loadBalancer:
+        servers:
+          - url: "http://imperium-hub-app:3000"
+
+    imperium-backend:
+      loadBalancer:
+        servers:
+          - url: "http://imperium-backend:4000"
+
+    hermes-agent:
+      loadBalancer:
+        servers:
+          - url: "http://hermes-agent:8001"
+
+    hermes-workspace:
+      loadBalancer:
+        servers:
+          - url: "http://hermes-workspace:3000"
+
+    react-playground:
+      loadBalancer:
+        servers:
+          - url: "http://react-playground:3000"
+
+middlewares:
+  securityHeaders:
+    headers:
+      customResponseHeaders:
+        X-Frame-Options: SAMEORIGIN
+        X-Content-Type-Options: nosniff
+        X-XSS-Protection: "1; mode=block"
+        Referrer-Policy: strict-origin-when-cross-origin
+        Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+        Strict-Transport-Security: "max-age=31536000; includeSubDomains; preload"
+
+  compress:
+    compress: {}
