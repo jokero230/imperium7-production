@@ -2,121 +2,54 @@ name: Deploy to server
 
 on:
   push:
-    branches: [ main ]
-
-permissions:
-  contents: read
+    branches:
+      - main
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    env:
-      REPO_URL: ${{ secrets.REPO_URL }}
-      FRONTEND_PATH: ${{ secrets.FRONTEND_PATH }}
-      BACKEND_PATH: ${{ secrets.BACKEND_PATH }}
-      TRIADA_PATH: ${{ secrets.TRIADA_PATH }}
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare SSH key and known_hosts
+      - name: Setup SSH key
         run: |
-          set -euo pipefail
           mkdir -p ~/.ssh
-          # write key reliably (preserves newlines)
-          printf '%s\n' "${{ secrets.DEPLOY_KEY }}" > ~/.ssh/id_ed25519
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          # start agent and add key (helps some actions/tools)
-          eval "$(ssh-agent -s)"
-          ssh-add ~/.ssh/id_ed25519
-          if [ -z "${{ secrets.SERVER_HOST }}" ]; then
-            echo "ERROR: SERVER_HOST secret is empty" >&2
-            exit 1
-          fi
-          # add host to known_hosts (avoid interactive prompt)
-          ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
-        shell: bash
+          ssh-keyscan -H "${SERVER_HOST}" >> ~/.ssh/known_hosts
 
-      - name: Deploy via SSH (run build/install/restart)
-        uses: appleboy/ssh-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.DEPLOY_KEY }}
-          script: |
-            set -euo pipefail
+      - name: Deploy FRONTEND
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${SERVER_USER}@${SERVER_HOST} "
+            cd ${FRONTEND_PATH} || exit 1
+            git pull
+            npm ci || true
+            npm run build || true
+            pm2 restart frontend || true
+          "
 
-            REPO="${REPO:-${{ secrets.REPO_URL }}}"
-            REPO="${REPO:-git@github.com:jokero230/imperium7-production.git}"
-            FRONTEND_PATH="${{ secrets.FRONTEND_PATH }}"
-            BACKEND_PATH="${{ secrets.BACKEND_PATH }}"
-            TRIADA_PATH="${{ secrets.TRIADA_PATH }}"
+      - name: Deploy BACKEND
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${SERVER_USER}@${SERVER_HOST} "
+            cd ${BACKEND_PATH} || exit 1
+            git pull
+            npm ci || true
+            npm run build || true
+            pm2 restart backend || true
+          "
 
-            # ensure directories exist
-            mkdir -p "${FRONTEND_PATH}" "${BACKEND_PATH}" "${TRIADA_PATH}"
+      - name: Deploy TRIADA
+        run: |
+          ssh -i ~/.ssh/id_ed25519 ${SERVER_USER}@${SERVER_HOST} "
+            cd ${TRIADA_PATH} || exit 1
+            git pull
+            npm ci || true
+            npm run build || true
+            pm2 restart triada || true
+          "
 
-            update_repo() {
-              local path="$1"; local repo="$2"
-              if [ -d "$path/.git" ]; then
-                cd "$path"
-                git fetch --all --prune
-                git reset --hard origin/main || true
-                git clean -fd || true
-              else
-                rm -rf "$path"
-                git clone --depth 1 "$repo" "$path" || ( echo "git clone failed for $repo -> $path" >&2; exit 1 )
-              fi
-            }
-
-            # FRONTEND (Next.js) - build if package exists
-            if [ -n "${FRONTEND_PATH}" ] && [ -d "${FRONTEND_PATH}" ] || true; then
-              update_repo "${FRONTEND_PATH}" "${REPO}"
-              if [ -f "${FRONTEND_PATH}/package.json" ]; then
-                cd "${FRONTEND_PATH}"
-                npm ci --prefer-offline --no-audit --no-fund || npm install --no-audit --no-fund
-                npm run build || echo "Frontend build failed but continuing"
-              fi
-            fi
-
-            # BACKEND Imperium
-            update_repo "${BACKEND_PATH}" "${REPO}"
-            if [ -f "${BACKEND_PATH}/package.json" ]; then
-              cd "${BACKEND_PATH}"
-              npm ci --prefer-offline --no-audit --no-fund || npm install --no-audit --no-fund
-            fi
-
-            # TRIADA backend
-            update_repo "${TRIADA_PATH}" "${REPO}"
-            if [ -f "${TRIADA_PATH}/package.json" ]; then
-              cd "${TRIADA_PATH}"
-              npm ci --prefer-offline --no-audit --no-fund || npm install --no-audit --no-fund
-            fi
-
-            # Ensure pm2 exists and restart apps (tolerant to missing apps)
-            if ! command -v pm2 >/dev/null 2>&1; then
-              npm i -g pm2
-            fi
-
-            # Try smart restarts; if process doesn't exist, attempt start via ecosystem file if present
-            if pm2 pid imperium-hub >/dev/null 2>&1; then
-              pm2 restart imperium-hub || true
-            else
-              if [ -f "${BACKEND_PATH}/ecosystem.config.js" ]; then
-                pm2 start "${BACKEND_PATH}/ecosystem.config.js" --only imperium-hub || true
-              fi
-            fi
-
-            pm2 restart imperium-api || true
-            pm2 restart triada-api || true
-
-            # Configure logrotate plugin
-            pm2 install pm2-logrotate || true
-            pm2 set pm2-logrotate:max_size 20M || true
-            pm2 set pm2-logrotate:retain 14 || true
-            pm2 set pm2-logrotate:compress true || true
-            pm2 save || true
-
-            # Post-deploy health checks (non-blocking)
-            curl -I --max-time 10 "https://${{ secrets.SERVER_HOST }}" || true
-            curl -i --max-time 10 "https://${{ secrets.SERVER_HOST }}/api/status" || true
-            curl -i --max-time 10 "https://${{ secrets.SERVER_HOST }}/triada/status" || true
+      - name: Health check
+        run: |
+          curl -I https://${SERVER_HOST} || true
